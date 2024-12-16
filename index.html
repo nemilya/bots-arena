@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bots Arena</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+    <style>
+        #app {
+            display: flex;
+            height: 100vh;
+        }
+        .sidebar {
+            width: 300px;
+            border-right: 1px solid #ccc;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .message {
+            margin-bottom: 15px;
+            text-align: left;
+        }
+        .message .author {
+            font-weight: bold;
+        }
+        .debug-info {
+            font-size: 0.9em;
+            color: gray;
+            background-color: #eee;
+            padding: 5px;
+            margin-top: 5px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+<div id="app">
+    <div class="sidebar">
+        <h2 class="title is-4">Configuration</h2>
+        <div class="field">
+            <label class="label">API Key</label>
+            <div class="control">
+                <input v-model="config.apiKey" class="input" type="text" placeholder="Enter API Key">
+            </div>
+        </div>
+        <div class="field">
+            <label class="label">Base URL</label>
+            <div class="control">
+                <input v-model="config.baseUrl" class="input" type="text" placeholder="Enter Base URL">
+            </div>
+        </div>
+        <div class="field">
+            <label class="label">Model</label>
+            <div class="control">
+                <input v-model="config.model" class="input" type="text" placeholder="Enter model (e.g., deepseek-chat)">
+            </div>
+        </div>
+        <div class="field">
+            <label class="label">Temperature</label>
+            <div class="control">
+                <input v-model.number="config.temperature" class="input" type="number" step="0.1" min="0" max="1" placeholder="Enter temperature (e.g., 0.7)">
+            </div>
+        </div>
+        <div class="field">
+            <label class="checkbox">
+                <input type="checkbox" v-model="debugMode">
+                Debug
+            </label>
+        </div>
+        <div class="field">
+            <label class="label">Bot 1 Name and Prompt</label>
+            <div class="control">
+                <input v-model="botName1" class="input" type="text" placeholder="Enter Bot 1 Name">
+                <textarea v-model="systemPrompt1" class="textarea" placeholder="Enter system prompt for Bot 1" style="margin-top: 0.5rem;"></textarea>
+            </div>
+        </div>
+        <div class="field">
+            <label class="label">Bot 2 Name and Prompt</label>
+            <div class="control">
+                <input v-model="botName2" class="input" type="text" placeholder="Enter Bot 2 Name">
+                <textarea v-model="systemPrompt2" class="textarea" placeholder="Enter system prompt for Bot 2" style="margin-top: 0.5rem;"></textarea>
+            </div>
+        </div>
+        <div class="field">
+            <label class="label">First Message from Bot 1</label>
+            <div class="control">
+                <input v-model="initialMessage" class="input" type="text" placeholder="Enter first message">
+            </div>
+        </div>
+        <div class="field">
+            <label class="label">Number of Messages in Dialogue</label>
+            <div class="control">
+                <input v-model="messageCount" class="input" type="number" min="1" placeholder="Enter number of messages">
+            </div>
+        </div>
+        <div class="field">
+            <button @click="startDialogue" class="button is-primary" :disabled="isSending">Start</button>
+        </div>
+        <div class="field">
+            <p>Messages left: {{ remainingMessages }}</p>
+        </div>
+    </div>
+
+    <div class="chat-container">
+        <div class="messages" ref="messages">
+            <div v-for="(msg, index) in messages" :key="index" class="message">
+                <span class="author">{{ msg.author }}:</span> {{ msg.content }}
+                <button v-if="debugMode" @click="msg.showDebug = !msg.showDebug" class="button is-small is-info">Debug</button>
+                <div v-if="msg.showDebug" class="debug-info">
+                    <pre>{{ getDebugInfo(index) }}</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    new Vue({
+        el: '#app',
+        data: {
+            isSending: false,
+            debugMode: false,
+            botName1: 'Flat Earth',
+            botName2: 'Scientist',
+            systemPrompt1: 'You believe the earth is flat and nothing will change that belief — you have seen it yourself. You are confident in your viewpoint. Stick to your belief, you are 100% sure.',
+            systemPrompt2: 'You are an astronomer, a person who despises charlatans. Respond briefly.',
+            initialMessage: 'The Earth is flat.',
+            messageCount: 5,
+            remainingMessages: 0,
+            messages: [],
+            apiLogs: [],
+            config: {
+                apiKey: '',
+                baseUrl: 'https://api.deepseek.com',
+                model: 'deepseek-chat',
+                temperature: 0.7
+            }
+        },
+        methods: {
+            async startDialogue() {
+                if (!this.initialMessage.trim() || this.messageCount < 1 || !this.config.apiKey || !this.config.baseUrl || !this.config.model) {
+                    alert('Please fill out all configuration fields and enter a valid initial message and number of messages.');
+                    return;
+                }
+
+                this.messages = [];
+                this.apiLogs = [];
+                let messageCounter = 0;
+                let turn = 1;
+
+                this.remainingMessages = this.messageCount;
+                this.messages.push({ author: this.botName1, content: this.initialMessage, showDebug: false });
+
+                while (messageCounter < this.messageCount) {
+                    this.isSending = true;
+                    let respondingAuthor = turn === 1 ? this.botName2 : this.botName1;
+                    let systemPrompt = turn === 1 ? this.systemPrompt2 : this.systemPrompt1;
+
+                    let messagesForApi = [{ role: 'system', content: systemPrompt }];
+                    messagesForApi.push(...this.messages.map(msg => ({
+                        role: msg.author === respondingAuthor ? 'assistant' : 'user',
+                        content: msg.content
+                    })));
+
+                    if (this.debugMode) {
+                        this.apiLogs.push(JSON.stringify({
+                            model: this.config.model,
+                            temperature: this.config.temperature,
+                            messages: messagesForApi
+                        }, null, 2));
+                    }
+
+                    let messageObj = { author: respondingAuthor, content: '', showDebug: false };
+                    this.messages.push(messageObj);
+
+                    await this.fetchBotResponse(messagesForApi, messageObj);
+
+                    messageCounter++;
+                    this.remainingMessages--;
+                    turn = turn === 1 ? 2 : 1;
+                    this.scrollToBottom();
+                }
+                this.isSending = false;
+            },
+            async fetchBotResponse(messagesForApi, messageObj) {
+                const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.config.apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: this.config.model,
+                        temperature: this.config.temperature,
+                        messages: messagesForApi,
+                        max_tokens: 4000,
+                        stream: true
+                    })
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                let result;
+
+                while (!(result = await reader.read()).done) {
+                    const chunk = decoder.decode(result.value, { stream: true });
+                    const lines = chunk.split('\n').filter(line => line.trim() !== '');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = line.replace('data: ', '');
+                            if (data === '[DONE]') {
+                                return;
+                            }
+                            try {
+                                const message = JSON.parse(data);
+                                if (message.choices && message.choices.length > 0) {
+                                    const delta = message.choices[0].delta && message.choices[0].delta.content || '';
+                                    messageObj.content += delta;
+                                    this.$forceUpdate();
+                                    this.scrollToBottom();
+                                }
+                            } catch (error) {
+                                console.error('Error parsing JSON:', error);
+                            }
+                        }
+                    }
+                }
+            },
+            getDebugInfo(index) {
+                return this.apiLogs[index];
+            },
+            scrollToBottom() {
+                this.$nextTick(() => {
+                    const messagesContainer = this.$refs.messages;
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                });
+            }
+        }
+    });
+</script>
+</body>
+</html>
+
